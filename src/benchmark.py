@@ -81,6 +81,8 @@ def run_experiment(
             category=item["category"],
             max_tokens=vllm["max_tokens"],
             target=item["target"],
+            instruction_ids=item.get("instruction_ids"),
+            instruction_kwargs=item.get("instruction_kwargs"),
         )
         results.append(result)
         time.sleep(0.05)

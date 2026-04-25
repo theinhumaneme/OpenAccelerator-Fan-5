@@ -53,6 +53,6 @@ vllm:
 benchmark:
   num_prompts_per_task: 15
   tasks:
-    - "leaderboard|mmlu:abstract_algebra|5|0"
-    - "leaderboard|hellaswag|10|0"
-    - "lighteval|gsm8k|5|0"
+    - "extended|ifeval|0|0"                          # instruction following (verifiable constraints)
+    - "lighteval|gsm8k|5|0"                          # math reasoning (long outputs)
+    - "leaderboard|mmlu_pro:computer_science|5|0"    # MMLU-Pro (harder than base MMLU)
