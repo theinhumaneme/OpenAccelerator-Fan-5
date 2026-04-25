@@ -126,8 +126,48 @@ def plot_ttft(data: dict, out_dir: Path) -> None:
     print(f"  Saved {path}")
 
 
+def plot_task_accuracy(data: dict, out_dir: Path) -> None:
+    names = list(data.keys())
+    accs = [data[n].get("accuracy", {}).get("accuracy", 0.0) for n in names]
+
+    fig, ax = plt.subplots(figsize=(9, 4))
+    bars = ax.bar(
+        [_short_label(n) for n in names],
+        accs,
+        color=[_color(n) for n in names],
+        edgecolor="white",
+        linewidth=0.5,
+    )
+    ax.set_ylabel("Task Accuracy")
+    ax.set_title("Lighteval Task Accuracy by Verifier Architecture")
+    ax.set_ylim(0, 1.05)
+    for bar, acc in zip(bars, accs):
+        ax.text(
+            bar.get_x() + bar.get_width() / 2,
+            bar.get_height() + 0.01,
+            f"{acc:.2f}",
+            ha="center", va="bottom", fontsize=8,
+        )
+    legend_patches = [
+        mpatches.Patch(color=DENSE_COLOR, label="Dense verifier"),
+        mpatches.Patch(color=MOE_COLOR, label="MoE verifier"),
+    ]
+    ax.legend(handles=legend_patches, loc="upper right")
+    plt.tight_layout()
+    path = out_dir / "task_accuracy.png"
+    fig.savefig(path, dpi=150)
+    plt.close(fig)
+    print(f"  Saved {path}")
+
+
 def plot_by_category(data: dict, out_dir: Path) -> None:
-    categories = ["code", "math", "chat"]
+    categories = sorted(set(
+        cat
+        for d in data.values()
+        for cat in d.get("per_category", {})
+    ))
+    if not categories:
+        return
     exp_names = list(data.keys())
     x = np.arange(len(categories))
     w = 0.8 / len(exp_names)
@@ -182,20 +222,22 @@ def plot_difficulty_buckets(data: dict, out_dir: Path) -> None:
 
 
 def print_summary(data: dict) -> None:
-    print("\n" + "=" * 80)
-    print(f"{'Experiment':<35} {'AccRate':>8} {'TPS':>8} {'TTFT_ms':>9} {'P95_ms':>9}")
-    print("-" * 80)
+    print("\n" + "=" * 92)
+    print(f"{'Experiment':<35} {'AccRate':>8} {'TPS':>8} {'TTFT_ms':>9} {'P95_ms':>9} {'Accuracy':>9}")
+    print("-" * 92)
     for name, d in data.items():
         acc = d.get("acceptance_rate")
         s = d.get("stats", {})
+        task_acc = d.get("accuracy", {}).get("accuracy", 0.0)
         print(
             f"{name:<35} "
             f"{acc or 0:>8.3f} "
             f"{s.get('mean_throughput_tps', 0):>8.1f} "
             f"{s.get('mean_ttft_ms', 0):>9.1f} "
-            f"{s.get('p95_ttft_ms', 0):>9.1f}"
+            f"{s.get('p95_ttft_ms', 0):>9.1f} "
+            f"{task_acc:>9.3f}"
         )
-    print("=" * 80)
+    print("=" * 92)
 
 
 def main() -> None:
@@ -217,6 +259,7 @@ def main() -> None:
     plot_acceptance_rates(data, out_dir)
     plot_throughput(data, out_dir)
     plot_ttft(data, out_dir)
+    plot_task_accuracy(data, out_dir)
     plot_by_category(data, out_dir)
     plot_difficulty_buckets(data, out_dir)
 

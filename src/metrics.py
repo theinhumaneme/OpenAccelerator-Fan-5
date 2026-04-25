@@ -3,6 +3,23 @@ import httpx
 import numpy as np
 
 
+def compute_task_accuracy(results: list) -> dict:
+    """Generation accuracy: target string must appear at the start of the model output."""
+    correct = total = 0
+    for r in results:
+        if not r.target:
+            continue
+        total += 1
+        # Normalize: strip non-alphanumeric, lowercase, compare prefix of output
+        norm = lambda s: re.sub(r"[^a-z0-9]", "", s.lower())
+        if norm(r.target) and norm(r.target) in norm(r.output[:len(r.target) + 30]):
+            correct += 1
+    return {
+        "accuracy": correct / total if total else 0.0,
+        "n_scored": total,
+    }
+
+
 # vLLM exposes this gauge in its Prometheus /metrics endpoint when
 # speculative decoding is enabled.
 _ACCEPTANCE_RATE_METRIC = "vllm:spec_decode_draft_acceptance_rate"

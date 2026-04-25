@@ -1,59 +1,44 @@
-PROMPTS: dict[str, list[str]] = {
-    "code": [
-        "Write a Python function to find all prime numbers up to n using the Sieve of Eratosthenes.",
-        "Implement a binary search tree with insert, search, and delete operations in Python.",
-        "Write a Python decorator that caches function results with a configurable TTL.",
-        "Implement a thread-safe queue in Python using only threading primitives, no queue module.",
-        "Write a Python function to parse a JSON-like nested structure without the json module.",
-        "Implement merge sort in Python and explain the recurrence relation for its time complexity.",
-        "Write a Python context manager that measures and logs wall-clock execution time.",
-        "Implement a simple LRU cache in Python using OrderedDict.",
-        "Write a Python function that flattens a deeply nested list to arbitrary depth.",
-        "Implement a basic tokenizer that splits text into tokens, handling punctuation and whitespace.",
-        "Write a Python generator that yields Fibonacci numbers lazily without recursion.",
-        "Implement a sliding-window rate limiter in Python.",
-        "Write a Python function to detect cycles in a directed graph using DFS.",
-        "Implement a trie data structure in Python with insert, search, and prefix_count methods.",
-        "Write a Python function to serialize and deserialize a binary tree to/from a string.",
-        "Implement a simple event emitter in Python supporting multiple listeners per event.",
-        "Write a function that finds the longest common subsequence of two strings.",
-    ],
-    "math": [
-        "Solve step by step: x² + 5x + 6 = 0. Find all values of x.",
-        "Prove that the square root of 2 is irrational using proof by contradiction.",
-        "Calculate the integral of x·sin(x) dx using integration by parts, showing each step.",
-        "Find the eigenvalues and eigenvectors of the matrix [[2, 1], [1, 2]].",
-        "A bag has 5 red balls and 3 blue balls. What is the probability of drawing 2 red balls without replacement?",
-        "Derive the closed-form formula for the sum of a geometric series with first term a and ratio r.",
-        "Solve the differential equation dy/dx = 2xy with initial condition y(0) = 1.",
-        "Find the number of ways to arrange 5 books on a shelf if 2 specific books must be adjacent.",
-        "Compute the gradient of f(x, y) = x²y + sin(xy) at the point (1, π).",
-        "Prove that for any integer n, n³ - n is divisible by 6.",
-        "Evaluate the limit: lim(x→0) [sin(3x) / x].",
-        "A sequence satisfies a(n) = a(n-1) + a(n-2), a(0) = 0, a(1) = 1. Find a(10).",
-        "Prove by induction that 1 + 2 + ... + n = n(n+1)/2.",
-        "Solve the system: 2x + 3y = 7, x - y = 1. Show your work.",
-        "Find the rank of [[1, 2, 3], [4, 5, 6], [7, 8, 9]] and explain what it means geometrically.",
-        "What is the expected number of coin flips to get two heads in a row?",
-        "Explain the Monty Hall problem and prove the correct answer using conditional probability.",
-    ],
-    "chat": [
-        "Explain how transformers work in machine learning, for a software engineer with no ML background.",
-        "What are the main differences between SQL and NoSQL databases? When would you choose each?",
-        "Explain the CAP theorem and give a real-world example of each trade-off.",
-        "What is the difference between a process and a thread? When should you prefer multiprocessing over threading in Python?",
-        "Explain how TCP/IP works, focusing on the three-way handshake and reliability mechanisms.",
-        "What is a memory leak? How would you detect and fix one in a Python application?",
-        "Explain the difference between authentication and authorization with concrete examples.",
-        "What is eventual consistency and why does it matter in distributed systems?",
-        "How does garbage collection work in Python? Describe the main strategies used.",
-        "Explain SOLID principles with one concrete example of each.",
-        "What is the difference between horizontal and vertical scaling? When do you choose each?",
-        "How does a CDN work, and what kinds of applications benefit most from one?",
-        "Explain the difference between REST and GraphQL. What are the practical trade-offs?",
-        "What is a deadlock? Explain how to detect it and two strategies to prevent it.",
-        "How do hash tables work internally, including at least two collision resolution strategies?",
-        "Explain the difference between compiled and interpreted languages with examples.",
-        "What is a Bloom filter and what problem does it solve?",
-    ],
-}
+import random
+
+from lighteval.tasks.lighteval_task import LightevalTask
+from lighteval.tasks.registry import Registry
+
+
+def load_lighteval_tasks(
+    task_names: list[str],
+    num_prompts_per_task: int | None = None,
+    seed: int = 42,
+) -> list[dict]:
+    """Load evaluation prompts from lighteval tasks.
+
+    task_names: lighteval format, e.g. ["leaderboard|mmlu:abstract_algebra|5|0"]
+    Returns list of dicts with: prompt, target, choices, category, task_name
+    """
+    registry = Registry(tasks=",".join(task_names), custom_tasks=None)
+    task_dict = registry.load_tasks()
+    LightevalTask.load_datasets(tasks=task_dict, dataset_loading_processes=1)
+
+    rng = random.Random(seed)
+    out: list[dict] = []
+
+    for task_name, task in task_dict.items():
+        # Derive category from "suite|task:subset|fewshot|version"
+        category = task_name.split("|")[1].split(":")[0]
+        docs = list(task.eval_docs())
+        if num_prompts_per_task and num_prompts_per_task < len(docs):
+            docs = rng.sample(docs, num_prompts_per_task)
+
+        for doc in docs:
+            prefix = (doc.instruction + "\n") if doc.instruction else ""
+            prompt = prefix + doc.query
+            golds = doc.get_golds()
+            target = golds[0] if golds else ""
+            out.append({
+                "prompt": prompt,
+                "target": str(target),
+                "choices": doc.choices or [],
+                "category": category,
+                "task_name": task_name,
+            })
+
+    return out

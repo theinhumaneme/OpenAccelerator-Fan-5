@@ -13,6 +13,7 @@ class RequestResult:
     total_ms: float
     throughput_tps: float
     token_logprobs: list[float] = field(default_factory=list)
+    target: str = ""
 
 
 def make_client(base_url: str) -> OpenAI:
@@ -25,6 +26,7 @@ def run_request(
     prompt: str,
     category: str,
     max_tokens: int = 256,
+    target: str = "",
 ) -> RequestResult:
     start = time.perf_counter()
     first_token_t: float | None = None
@@ -65,4 +67,5 @@ def run_request(
         total_ms=total_ms,
         throughput_tps=throughput_tps,
         token_logprobs=token_logprobs,
+        target=target,
     )

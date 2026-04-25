@@ -5,3 +5,4 @@ matplotlib>=3.8.0
 numpy>=1.24.0
 pandas>=2.0.0
 tqdm>=4.66.0
+lighteval[extended_tasks]>=0.6.0

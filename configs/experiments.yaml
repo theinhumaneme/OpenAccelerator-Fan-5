@@ -48,8 +48,11 @@ vllm:
   base_url: "http://localhost:8000/v1"
   metrics_url: "http://localhost:8000/metrics"
   num_speculative_tokens: 5
-  max_tokens: 256
+  max_tokens: 512
 
 benchmark:
-  num_prompts: 50          # ~17 per category
-  categories: [code, math, chat]
+  num_prompts_per_task: 15
+  tasks:
+    - "leaderboard|mmlu:abstract_algebra|5|0"
+    - "leaderboard|hellaswag|10|0"
+    - "lighteval|gsm8k|5|0"

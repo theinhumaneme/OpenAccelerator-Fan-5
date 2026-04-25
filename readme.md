@@ -40,6 +40,7 @@ Speculative decoding works because a small draft model proposes tokens and a lar
 | Throughput (tok/s) | Output tokens ÷ total wall time, per request |
 | TTFT | Time from request send to first streamed token |
 | P95 TTFT | 95th percentile TTFT across all prompts |
+| Task accuracy | Generation accuracy on lighteval benchmark tasks (gold answer in output prefix) |
 | Token difficulty | Mean log-probability of output tokens, bucketed into quartiles |
 
 Token difficulty bucketing uses the verifier's output logprobs as a proxy: tokens with very negative logprobs are ones where the verifier is uncertain (hard tokens). This lets you see whether acceptance rate gaps are uniform or concentrated at hard tokens.
@@ -147,23 +148,24 @@ python src/analyze.py
 
 ## Output
 
-`src/analyze.py` produces five charts:
+`src/analyze.py` produces six charts:
 
 - **`acceptance_rates.png`** — bar chart of acceptance rate per experiment
 - **`throughput.png`** — mean tokens/sec per experiment
 - **`ttft.png`** — mean and P95 TTFT per experiment
-- **`by_category.png`** — throughput broken down by task category (code / math / chat)
+- **`task_accuracy.png`** — lighteval task accuracy per experiment
+- **`by_category.png`** — throughput broken down by lighteval task category (e.g. mmlu / hellaswag / gsm8k)
 - **`difficulty_buckets.png`** — verifier confidence across easy/hard token buckets
 
 And a summary table printed to stdout:
 
 ```
-Experiment                          AccRate      TPS   TTFT_ms    P95_ms
---------------------------------------------------------------------------------
-dense_same_family                     0.821    142.3     312.1     489.0
-dense_cross_family                    0.743    138.7     318.4     501.2
-moe_cross_family                      0.691    159.4     298.7     445.3
-moe_alt_draft                         0.703    155.1     304.2     460.8
+Experiment                          AccRate      TPS   TTFT_ms    P95_ms  Accuracy
+--------------------------------------------------------------------------------------------
+dense_same_family                     0.821    142.3     312.1     489.0     0.612
+dense_cross_family                    0.743    138.7     318.4     501.2     0.608
+moe_cross_family                      0.691    159.4     298.7     445.3     0.603
+moe_alt_draft                         0.703    155.1     304.2     460.8     0.597
 ```
 
 *(example values — replace with your actual results)*
@@ -189,8 +191,8 @@ moe_alt_draft                         0.703    155.1     304.2     460.8
 ├── src/
 │   ├── benchmark.py           # orchestrator: runs prompts, saves JSON
 │   ├── client.py              # vLLM OpenAI-compatible client with TTFT timing
-│   ├── metrics.py             # Prometheus scraper + token difficulty bucketing
-│   ├── prompts.py             # 50 prompts across code / math / chat
+│   ├── metrics.py             # Prometheus scraper, token difficulty bucketing, task accuracy
+│   ├── prompts.py             # lighteval task loader (MMLU, HellaSwag, GSM8K)
 │   └── analyze.py             # loads JSON results, generates charts
 ├── results/                   # benchmark outputs (gitignored)
 └── requirements.txt
