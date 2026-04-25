@@ -16,6 +16,16 @@ Speculative decoding works because a small draft model proposes tokens and a lar
 
 ---
 
+## To start we have two experiments do these first
+Experiment 1: Dense vs. Dense (The Gemma 4 Ecosystem)
+Your Draft Model Options:
+Draft Option 1 (Fastest): google/gemma-4-2b-it
+Draft Option 2 (Most Accurate): google/gemma-4-4b-it
+
+Experiment 2: MoE vs. MoE (Brand New April 2026 Ecosystems)
+Target Model: Qwen/Qwen3-235B-A22B-Instruct
+Draft Model: Qwen/Qwen3.6-35B-A3B-Instruct (Released April 14, 2026)
+
 ## Benchmark Matrix
 
 | Experiment | Draft | Verifier | Verifier Arch | Family |
