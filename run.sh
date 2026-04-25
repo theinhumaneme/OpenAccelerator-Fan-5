@@ -5,6 +5,7 @@ CONFIG="${CONFIG:-configs/experiment.yaml}"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 MODE="${MODE:-local}"
 RUN_ID="${1:-}"
+REQUESTED_RUN_ID="$RUN_ID"
 
 usage() {
     cat <<'EOF'
@@ -69,6 +70,7 @@ if [[ -f .env ]]; then
     source .env
     set +o allexport
 fi
+RUN_ID="$REQUESTED_RUN_ID"
 
 if [[ -z "${HF_TOKEN:-}" ]]; then
     echo "[run.sh] ERROR: HF_TOKEN is required for gated Gemma models. Set it in .env." >&2
