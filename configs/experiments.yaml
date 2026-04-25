@@ -1,0 +1,55 @@
+# Benchmark matrix: 2 verifier architectures × 2 draft families = 4 experiments.
+# For each experiment, manually launch vLLM with the right model pair (see scripts/),
+# then run: python src/benchmark.py --experiment <name>
+
+experiments:
+
+  # Baseline: same-family dense pair. Spec dec works best here because
+  # the draft is a compressed version of the same distribution.
+  dense_same_family:
+    name: "Dense Draft → Dense Verifier (same family)"
+    verifier: "google/gemma-2-27b-it"
+    draft: "google/gemma-2-2b-it"
+    verifier_type: dense
+    family: same
+    launch_script: "scripts/launch_dense_same.sh"
+
+  # Cross-family dense pair. Measures the family-mismatch penalty alone,
+  # holding verifier architecture constant.
+  dense_cross_family:
+    name: "Dense Draft → Dense Verifier (cross family)"
+    verifier: "google/gemma-2-27b-it"
+    draft: "Qwen/Qwen2.5-3B-Instruct"
+    verifier_type: dense
+    family: cross
+    launch_script: "scripts/launch_dense_cross.sh"
+
+  # MoE verifier with a draft from a different family.
+  # Key comparison against dense_cross_family: same draft, different verifier arch.
+  moe_cross_family:
+    name: "Dense Draft → MoE Verifier (cross family)"
+    verifier: "mistralai/Mixtral-8x7B-Instruct-v0.1"
+    draft: "Qwen/Qwen2.5-3B-Instruct"
+    verifier_type: moe
+    family: cross
+    launch_script: "scripts/launch_moe_cross.sh"
+
+  # MoE verifier with a same-model-family-ish draft (Gemma is closer to nothing,
+  # so this tests whether draft choice interacts with MoE routing differently).
+  moe_alt_draft:
+    name: "Dense Draft (Gemma) → MoE Verifier"
+    verifier: "mistralai/Mixtral-8x7B-Instruct-v0.1"
+    draft: "google/gemma-2-2b-it"
+    verifier_type: moe
+    family: cross
+    launch_script: "scripts/launch_moe_alt.sh"
+
+vllm:
+  base_url: "http://localhost:8000/v1"
+  metrics_url: "http://localhost:8000/metrics"
+  num_speculative_tokens: 5
+  max_tokens: 256
+
+benchmark:
+  num_prompts: 50          # ~17 per category
+  categories: [code, math, chat]

@@ -1,0 +1,73 @@
+# Runs one experiment at a time.
+# Set env vars (see .env.example) then:
+#   docker compose up          — starts vLLM + benchmark, streams logs
+#   docker compose down        — stops and removes containers
+#
+# To swap model pairs between experiments:
+#   docker compose down
+#   VERIFIER_MODEL=... DRAFT_MODEL=... EXPERIMENT=... docker compose up
+#
+# Podman: replace `docker compose` with `podman compose` (requires podman-compose ≥ 1.0
+# or Podman 4.7+ built-in compose). GPU passthrough uses the same deploy section below
+# when CDI is configured (nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml).
+
+services:
+
+  vllm:
+    image: vllm/vllm-openai:latest
+    ipc: host            # shared memory for tensor parallel
+    ulimits:
+      memlock: -1
+      stack: 67108864
+    environment:
+      HF_TOKEN: ${HF_TOKEN:?Set HF_TOKEN in .env}
+      HUGGING_FACE_HUB_TOKEN: ${HF_TOKEN}
+    volumes:
+      - hf-cache:/root/.cache/huggingface
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 120s     # vLLM takes a while to load a 27B model
+    command: >
+      --model ${VERIFIER_MODEL:-google/gemma-2-27b-it}
+      --speculative-model ${DRAFT_MODEL:-google/gemma-2-2b-it}
+      --num-speculative-tokens ${NUM_SPEC_TOKENS:-5}
+      --speculative-draft-tensor-parallel-size 1
+      --tensor-parallel-size ${TP_SIZE:-4}
+      --max-model-len 4096
+      --gpu-memory-utilization 0.90
+      --enable-chunked-prefill
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  benchmark:
+    build: .
+    depends_on:
+      vllm:
+        condition: service_healthy
+    environment:
+      # Override the base URL so it reaches the vllm service by container name.
+      # benchmark.py reads this if set; otherwise it falls back to configs/experiments.yaml.
+      VLLM_BASE_URL: http://vllm:8000/v1
+      VLLM_METRICS_URL: http://vllm:8000/metrics
+    volumes:
+      - ./results:/app/results
+      - ./configs:/app/configs
+    # --wait-for-vllm is a safety net; the healthcheck above already gates startup,
+    # but vLLM sometimes needs a few extra seconds after /health returns 200.
+    command: >
+      --experiment ${EXPERIMENT:-dense_same_family}
+      --wait-for-vllm ${VLLM_WAIT:-60}
+      --out-dir /app/results
+
+volumes:
+  hf-cache:    # persists downloaded model weights across compose runs
