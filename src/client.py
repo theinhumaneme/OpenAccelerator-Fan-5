@@ -37,24 +37,23 @@ def run_request(
     output_parts: list[str] = []
     token_logprobs: list[float] = []
 
-    stream = client.completions.create(
+    stream = client.chat.completions.create(
         model=model,
-        prompt=prompt,
+        messages=[{"role": "user", "content": prompt}],
         max_tokens=max_tokens,
-        logprobs=1,
+        logprobs=True,
+        top_logprobs=1,
         stream=True,
     )
 
     for chunk in stream:
         choice = chunk.choices[0]
-        if choice.text:
+        if choice.delta.content:
             if first_token_t is None:
                 first_token_t = time.perf_counter()
-            output_parts.append(choice.text)
-        if choice.logprobs and choice.logprobs.token_logprobs:
-            token_logprobs.extend(
-                lp for lp in choice.logprobs.token_logprobs if lp is not None
-            )
+            output_parts.append(choice.delta.content)
+        if choice.logprobs and choice.logprobs.content:
+            token_logprobs.extend(item.logprob for item in choice.logprobs.content)
 
     total_ms = (time.perf_counter() - start) * 1000
     ttft_ms = ((first_token_t - start) * 1000) if first_token_t else total_ms

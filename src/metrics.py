@@ -112,6 +112,8 @@ def score_ifeval(results: list) -> dict:
             if not passed:
                 all_pass = False
         prompt_pass += int(all_pass)
+    if prompt_total == 0 and results:
+        print("  [warn] score_ifeval: no instruction_ids found — doc.specific may not contain IFEval metadata")
     return {
         "prompt_accuracy": prompt_pass / prompt_total if prompt_total else 0.0,
         "instruction_accuracy": inst_pass / inst_total if inst_total else 0.0,
@@ -121,15 +123,26 @@ def score_ifeval(results: list) -> dict:
 
 
 def _prefix_accuracy(results: list) -> dict:
-    """Prefix-match accuracy for multiple-choice / short-answer tasks."""
+    """Accuracy for MC and generation tasks.
+
+    Single-char targets (e.g. MMLU-Pro A/B/C/D): match at the start of output.
+    Multi-char targets (e.g. GSM8K numbers): search the full output, since
+    reasoning chains put the answer at the end.
+    """
     correct = total = 0
     norm = lambda s: re.sub(r"[^a-z0-9]", "", s.lower())
     for r in results:
         if not r.target:
             continue
         total += 1
-        if norm(r.target) and norm(r.target) in norm(r.output[:len(r.target) + 30]):
-            correct += 1
+        nt = norm(r.target)
+        if not nt:
+            continue
+        no = norm(r.output)
+        if len(nt) == 1:
+            correct += int(no.startswith(nt))
+        else:
+            correct += int(nt in no)
     return {"accuracy": correct / total if total else 0.0, "n_scored": total}
 
 

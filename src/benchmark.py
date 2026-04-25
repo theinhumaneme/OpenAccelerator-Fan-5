@@ -56,19 +56,15 @@ def run_experiment(
     exp_cfg: dict,
     global_cfg: dict,
     out_dir: Path,
+    prompts: list[dict],
 ) -> dict:
     vllm = global_cfg["vllm"]
-    bench = global_cfg["benchmark"]
 
     client = make_client(vllm["base_url"])
-    prompts = load_lighteval_tasks(
-        bench["tasks"],
-        num_prompts_per_task=bench.get("num_prompts_per_task"),
-    )
 
     print(f"  Verifier : {exp_cfg['verifier']}")
     print(f"  Draft    : {exp_cfg['draft']}")
-    print(f"  Prompts  : {len(prompts)} ({len(bench['tasks'])} tasks)")
+    print(f"  Prompts  : {len(prompts)}")
 
     acc_before = fetch_acceptance_rate(vllm["metrics_url"])
 
@@ -155,6 +151,14 @@ def main() -> None:
             sys.exit(1)
         experiments = {args.experiment: experiments[args.experiment]}
 
+    bench = cfg["benchmark"]
+    print(f"Loading prompts from {len(bench['tasks'])} lighteval tasks ...")
+    prompts = load_lighteval_tasks(
+        bench["tasks"],
+        num_prompts_per_task=bench.get("num_prompts_per_task"),
+    )
+    print(f"Loaded {len(prompts)} prompts.\n")
+
     for name, exp_cfg in experiments.items():
         print(f"\n{'='*60}")
         print(f"Experiment: {exp_cfg['name']}")
@@ -164,7 +168,7 @@ def main() -> None:
             print(f"Launch script: {exp_cfg.get('launch_script', 'n/a')}")
             print("Make sure vLLM is running with this model pair before continuing.")
             input("Press Enter when vLLM is ready... ")
-        run_experiment(name, exp_cfg, cfg, out_dir)
+        run_experiment(name, exp_cfg, cfg, out_dir, prompts)
 
     print("\nAll done. Run `python src/analyze.py` to generate charts.")
 
