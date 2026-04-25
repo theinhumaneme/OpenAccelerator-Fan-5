@@ -1,0 +1,12 @@
+id: "moe-26b"
+architecture: "moe"
+verifier:
+  model_id: "google/gemma-4-26B-A4B-it"
+  dtype: "bfloat16"
+  vram_estimate_gb: 52
+draft:
+  model_id: "YOUR_ORG/gemma-4-26B-A4B-it-GPTQ-4bit"
+  quantization: "gptq"
+  vram_estimate_gb: 14
+total_vram_gb: 66
+hypothesis: "MoE routing sensitivity to quantization noise"

@@ -1,0 +1,5 @@
+{"prompt": "Write a Python function `add(a, b)` that returns the sum of two numbers.", "category": "code"}
+{"prompt": "Write a Python function `is_palindrome(text)` that returns true when the input reads the same forwards and backwards, ignoring case and spaces.", "category": "code"}
+{"prompt": "Write a Python function `fib(n)` that returns the nth Fibonacci number using an iterative implementation.", "category": "code"}
+{"prompt": "Write a Python function `dedupe(items)` that preserves order while removing duplicate values from a list.", "category": "code"}
+{"prompt": "Write a Python function `chunked(items, size)` that yields lists of at most `size` elements.", "category": "code"}

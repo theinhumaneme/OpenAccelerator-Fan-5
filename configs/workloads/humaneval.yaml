@@ -1,0 +1,5 @@
+id: "humaneval"
+data_path: "workload_data/humaneval_prompts.jsonl"
+num_prompts: 164
+max_output_tokens: 512
+description: "Code generation - high acceptance regime"

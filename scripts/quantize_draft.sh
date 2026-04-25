@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Quantize a draft model to INT4 (W4A16) using LLM Compressor.
 # Usage: ./scripts/quantize_draft.sh [model_id] [output_dir]
-#   model_id   : HuggingFace model ID (default: google/gemma-2-2b-it)
+#   model_id   : HuggingFace model ID (default: google/gemma-4-31B-it)
 #   output_dir : where to save the quantized model (default: ./quantized-draft)
 set -euo pipefail
 
-MODEL_ID="${1:-google/gemma-2-2b-it}"
+MODEL_ID="${1:-google/gemma-4-31B-it}"
 OUTPUT_DIR="${2:-./quantized-draft}"
 
 pip install llmcompressor --quiet

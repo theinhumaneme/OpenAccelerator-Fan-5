@@ -1,0 +1,5 @@
+id: "sharegpt"
+data_path: "workload_data/sharegpt_slice.jsonl"
+num_prompts: 200
+max_output_tokens: 1024
+description: "Open-ended chat - harder acceptance regime"

@@ -1,18 +1,56 @@
 #!/usr/bin/env bash
-# Convenience wrapper for running one experiment end-to-end.
-# Detects Docker vs Podman and sets the correct GPU flags.
-#
-# Usage:
-#   ./run.sh dense_same_family
-#   ./run.sh moe_cross_family
-#
-# Prerequisites:
-#   cp .env.example .env && vim .env    (set HF_TOKEN and model names)
 set -euo pipefail
 
-EXPERIMENT="${1:-dense_same_family}"
+CONFIG="${CONFIG:-configs/experiment.yaml}"
+PYTHON_BIN="${PYTHON_BIN:-python3}"
+MODE="${MODE:-local}"
+RUN_ID="${1:-}"
 
-# ── runtime detection ──────────────────────────────────────────────────────────
+usage() {
+    cat <<'EOF'
+Usage:
+  ./run.sh --list-runs
+  ./run.sh <run_id>
+  ./run.sh                 # runs every expanded config, if VRAM validation passes
+
+Modes:
+  MODE=local   ./run.sh <run_id>   # benchmark.py starts/stops vLLM locally
+  MODE=compose ./run.sh <run_id>   # Docker/Podman starts vLLM, benchmark uses --external-vllm
+
+Environment:
+  CONFIG=configs/experiment.yaml
+  PYTHON_BIN=python3
+EOF
+}
+
+if [[ "${RUN_ID}" == "-h" || "${RUN_ID}" == "--help" ]]; then
+    usage
+    exit 0
+fi
+
+if [[ "${RUN_ID}" == "--list-runs" || "${RUN_ID}" == "list" ]]; then
+    "$PYTHON_BIN" src/benchmark.py --config "$CONFIG" --skip-vram-validation --list-runs
+    exit 0
+fi
+
+if [[ "$MODE" == "local" ]]; then
+    args=(src/benchmark.py --config "$CONFIG")
+    if [[ -n "$RUN_ID" ]]; then
+        args+=(--run-id "$RUN_ID")
+    fi
+    exec "$PYTHON_BIN" "${args[@]}"
+fi
+
+if [[ "$MODE" != "compose" ]]; then
+    echo "[run.sh] ERROR: MODE must be 'local' or 'compose'." >&2
+    exit 1
+fi
+
+if [[ -z "$RUN_ID" ]]; then
+    echo "[run.sh] ERROR: compose mode requires a run_id. Use ./run.sh --list-runs first." >&2
+    exit 1
+fi
+
 if command -v podman &>/dev/null; then
     RUNTIME=podman
     COMPOSE="podman compose"
@@ -26,40 +64,37 @@ else
     exit 1
 fi
 
-# ── sanity checks ─────────────────────────────────────────────────────────────
-if [[ ! -f .env ]]; then
-    echo "[run.sh] ERROR: .env not found. Run: cp .env.example .env && edit it" >&2
+if [[ -f .env ]]; then
+    set -o allexport
+    source .env
+    set +o allexport
+fi
+
+if [[ -z "${HF_TOKEN:-}" ]]; then
+    echo "[run.sh] ERROR: HF_TOKEN is required for gated Gemma models. Set it in .env." >&2
     exit 1
 fi
 
-# Verify GPU access
 if [[ "$RUNTIME" == "docker" ]]; then
     docker run --rm --gpus all nvidia/cuda:12.1.0-base-ubuntu22.04 nvidia-smi -L \
-        || { echo "[run.sh] ERROR: Docker GPU access failed (is nvidia-container-toolkit installed?)"; exit 1; }
+        || { echo "[run.sh] ERROR: Docker GPU access failed."; exit 1; }
 else
     podman run --rm --device nvidia.com/gpu=all --security-opt=label=disable \
         nvidia/cuda:12.1.0-base-ubuntu22.04 nvidia-smi -L \
-        || { echo "[run.sh] ERROR: Podman GPU access failed (is CDI configured? Run: nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml)"; exit 1; }
+        || { echo "[run.sh] ERROR: Podman GPU access failed. Generate CDI with nvidia-ctk if needed."; exit 1; }
 fi
 
-# ── run ───────────────────────────────────────────────────────────────────────
-export EXPERIMENT="$EXPERIMENT"
+set -o allexport
+eval "$("$PYTHON_BIN" src/benchmark.py --config "$CONFIG" --skip-vram-validation --emit-env "$RUN_ID")"
+set +o allexport
 
-# Source .env so model names are available for the compose file
-set -o allexport; source .env; set +o allexport
+echo "[run.sh] Starting run: $RUN_ID"
+echo "[run.sh] Verifier: $VERIFIER_MODEL"
+if [[ -n "$SPECULATIVE_CONFIG" ]]; then
+    echo "[run.sh] Speculative config: $SPECULATIVE_CONFIG"
+else
+    echo "[run.sh] Baseline run: speculation disabled"
+fi
 
-echo "[run.sh] Starting experiment: $EXPERIMENT"
-echo "[run.sh] Verifier: ${VERIFIER_MODEL:-google/gemma-2-27b-it}"
-echo "[run.sh] Draft   : ${DRAFT_MODEL:-google/gemma-2-2b-it}"
-echo ""
-
-# Tear down any previous run (different model pair may have been loaded).
 $COMPOSE down --remove-orphans 2>/dev/null || true
-
-# Build benchmark image if needed, then start both services.
-# vLLM health-check gates benchmark startup automatically.
 $COMPOSE up --build --abort-on-container-exit --exit-code-from benchmark
-
-echo ""
-echo "[run.sh] Done. Results in ./results/${EXPERIMENT}.json"
-echo "[run.sh] Run: python src/analyze.py   to generate charts"

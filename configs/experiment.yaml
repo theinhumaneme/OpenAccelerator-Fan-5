@@ -1,0 +1,38 @@
+experiment:
+  name: "gemma4-self-spec-dense-vs-moe"
+  version: "1.0"
+  timestamp_prefix: true
+
+hardware:
+  gpu_sku: "A100-80GB"
+  gpu_count: 1
+  vram_gb: 80
+
+model_registry:
+  - "models/gemma4-31b-dense.yaml"
+  - "models/gemma4-26b-moe.yaml"
+
+workload_registry:
+  - "workloads/humaneval.yaml"
+  - "workloads/sharegpt.yaml"
+
+sweep:
+  num_speculative_tokens: [1, 3, 5, 7]
+  temperatures: [0.0, 0.7]
+
+baselines:
+  run_no_speculation: true
+  warmup_requests: 10
+
+vllm_defaults:
+  host: "0.0.0.0"
+  port: 8000
+  served_model_name: "benchmark-model"
+  gpu_memory_utilization: 0.90
+  max_model_len: 4096
+  kv_cache_overhead_gb: 4
+  min_vram_headroom_gb: 4
+  enforce_eager: false
+  block_size: 16
+  max_num_seqs: 1
+  enable_prefix_caching: false

@@ -1,0 +1,12 @@
+id: "dense-31b"
+architecture: "dense"
+verifier:
+  model_id: "google/gemma-4-31B-it"
+  dtype: "bfloat16"
+  vram_estimate_gb: 62
+draft:
+  model_id: "YOUR_ORG/gemma-4-31B-it-GPTQ-4bit"
+  quantization: "gptq"
+  vram_estimate_gb: 16
+total_vram_gb: 78
+hypothesis: "Baseline self-speculation on dense architecture"

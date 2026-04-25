@@ -1,0 +1,5 @@
+{"prompt": "Explain speculative decoding to a backend engineer in two concise paragraphs.", "category": "chat"}
+{"prompt": "Give a practical checklist for debugging high time-to-first-token in a vLLM deployment.", "category": "chat"}
+{"prompt": "Compare dense and mixture-of-experts verifier models for latency-sensitive inference.", "category": "chat"}
+{"prompt": "Draft a short incident update for a model server that is healthy but returning low throughput.", "category": "chat"}
+{"prompt": "Summarize why acceptance rate alone can be misleading when evaluating speculative decoding.", "category": "chat"}

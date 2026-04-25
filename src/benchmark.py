@@ -1,175 +1,275 @@
-"""
-Main benchmark runner.
+from __future__ import annotations
 
-Usage:
-  # Run all experiments (prompts for each one in sequence):
-  python src/benchmark.py
-
-  # Run a single named experiment:
-  python src/benchmark.py --experiment dense_same_family
-
-  # Override config or output directory:
-  python src/benchmark.py --config configs/experiments.yaml --out-dir results/
-"""
-
+import argparse
+import logging
 import os
 import sys
-import json
-import time
-import random
-import argparse
+from datetime import datetime, timezone
 from pathlib import Path
-from dataclasses import asdict
+from urllib.parse import urlparse
 
-import httpx
-import yaml
-from tqdm import tqdm
+from config_manager import ExperimentPlan, RunConfig, load_experiment, run_to_env
+from driver.collector import collect_run
+from server_manager import VLLMServerProcess, build_vllm_command, run_warmup, wait_for_healthy
 
-sys.path.insert(0, str(Path(__file__).parent))
-from client import make_client, run_request
-from metrics import fetch_acceptance_rate, bucket_by_difficulty, aggregate
-from prompts import PROMPTS
-
-
-def wait_for_vllm(base_url: str, timeout: int = 300) -> None:
-    health_url = base_url.replace("/v1", "").rstrip("/") + "/health"
-    print(f"  Waiting for vLLM at {health_url} (timeout={timeout}s) ...")
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        try:
-            r = httpx.get(health_url, timeout=5.0)
-            if r.status_code == 200:
-                print("  vLLM is ready.")
-                return
-        except Exception:
-            pass
-        time.sleep(5)
-    raise TimeoutError(f"vLLM did not become ready within {timeout}s")
-
-
-def load_config(path: str) -> dict:
-    with open(path) as f:
-        return yaml.safe_load(f)
-
-
-def collect_prompts(categories: list[str], total: int) -> list[tuple[str, str]]:
-    per_cat = max(1, total // len(categories))
-    out: list[tuple[str, str]] = []
-    for cat in categories:
-        pool = PROMPTS.get(cat, [])
-        sample = random.sample(pool, min(per_cat, len(pool)))
-        out.extend((p, cat) for p in sample)
-    return out
-
-
-def run_experiment(
-    exp_name: str,
-    exp_cfg: dict,
-    global_cfg: dict,
-    out_dir: Path,
-) -> dict:
-    vllm = global_cfg["vllm"]
-    bench = global_cfg["benchmark"]
-
-    client = make_client(vllm["base_url"])
-    prompts = collect_prompts(bench["categories"], bench["num_prompts"])
-
-    print(f"  Verifier : {exp_cfg['verifier']}")
-    print(f"  Draft    : {exp_cfg['draft']}")
-    print(f"  Prompts  : {len(prompts)} ({bench['num_prompts']} requested)")
-
-    acc_before = fetch_acceptance_rate(vllm["metrics_url"])
-
-    results = []
-    for prompt, category in tqdm(prompts, desc=exp_name, ncols=80):
-        result = run_request(
-            client=client,
-            model=exp_cfg["verifier"],
-            prompt=prompt,
-            category=category,
-            max_tokens=vllm["max_tokens"],
-        )
-        results.append(result)
-        time.sleep(0.05)
-
-    acc_after = fetch_acceptance_rate(vllm["metrics_url"])
-
-    all_logprobs = [lp for r in results for lp in r.token_logprobs]
-
-    output = {
-        "experiment": exp_name,
-        "config": exp_cfg,
-        "acceptance_rate": acc_after,
-        "acceptance_rate_before": acc_before,
-        "stats": aggregate(results),
-        "difficulty_buckets": bucket_by_difficulty(all_logprobs),
-        "per_category": {
-            cat: aggregate([r for r in results if r.category == cat])
-            for cat in bench["categories"]
-        },
-        "raw": [asdict(r) for r in results],
-    }
-
-    out_path = out_dir / f"{exp_name}.json"
-    out_path.write_text(json.dumps(output, indent=2))
-    print(f"  Saved → {out_path}")
-
-    acc_str = f"{acc_after:.3f}" if acc_after is not None else "n/a"
-    tps = output["stats"].get("mean_throughput_tps", 0)
-    print(f"  acceptance_rate={acc_str}  throughput={tps:.1f} tok/s")
-
-    return output
+logger = logging.getLogger(__name__)
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--config", default="configs/experiments.yaml")
-    parser.add_argument("--experiment", help="Run only this experiment key")
+    parser = argparse.ArgumentParser(description="Run the speculative decoding benchmark matrix.")
+    parser.add_argument("--config", default="configs/experiment.yaml")
+    parser.add_argument("--run-id", help="Run one expanded run_id. Defaults to all runs.")
+    parser.add_argument("--cell-id", help="Filter runs by cell id, e.g. dense-31b or moe-26b.")
+    parser.add_argument("--workload-id", help="Filter runs by workload id.")
+    parser.add_argument("--baseline-only", action="store_true", help="Run only no-spec baselines.")
+    parser.add_argument("--spec-only", action="store_true", help="Run only speculative runs.")
+    parser.add_argument("--limit", type=int, help="Run at most N matching configs.")
     parser.add_argument("--out-dir", default="results")
+    parser.add_argument("--list-runs", action="store_true", help="Print expanded run ids and exit.")
+    parser.add_argument("--emit-env", metavar="RUN_ID", help="Print shell env for launching one run.")
+    parser.add_argument("--dry-run", action="store_true", help="Print vLLM commands without running.")
     parser.add_argument(
-        "--no-wait",
+        "--external-vllm",
         action="store_true",
-        help="Skip the interactive 'Press Enter' prompt (assumes vLLM is already up)",
+        help="Do not start vLLM; assume it is already running at --base-url.",
     )
+    parser.add_argument("--base-url", help="OpenAI-compatible base URL, e.g. http://localhost:8000/v1.")
+    parser.add_argument("--metrics-url", help="Prometheus metrics URL, e.g. http://localhost:8000/metrics.")
+    parser.add_argument("--health-url", help="vLLM health URL, e.g. http://localhost:8000/health.")
+    parser.add_argument("--health-timeout", type=int, default=600)
     parser.add_argument(
-        "--wait-for-vllm",
-        type=int,
-        default=0,
-        metavar="SECONDS",
-        help="Poll vLLM /health until ready (use in Docker/CI instead of --no-wait)",
+        "--skip-vram-validation",
+        action="store_true",
+        help="Expand/run configs even if the configured VRAM budget is overcommitted.",
     )
+    parser.add_argument("--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR"])
     args = parser.parse_args()
 
-    cfg = load_config(args.config)
+    logging.basicConfig(
+        level=getattr(logging, args.log_level),
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
 
-    # Allow Docker / CI to override vLLM URLs via environment variables.
-    if url := os.environ.get("VLLM_BASE_URL"):
-        cfg["vllm"]["base_url"] = url
-    if url := os.environ.get("VLLM_METRICS_URL"):
-        cfg["vllm"]["metrics_url"] = url
+    try:
+        plan = load_experiment(args.config, validate_vram=False)
+    except Exception as exc:
+        print(str(exc), file=sys.stderr)
+        sys.exit(2)
 
-    out_dir = Path(args.out_dir)
-    out_dir.mkdir(exist_ok=True)
+    if args.emit_env:
+        run = _find_run(plan.runs, args.emit_env)
+        print(run_to_env(run))
+        return
 
-    experiments = cfg["experiments"]
-    if args.experiment:
-        if args.experiment not in experiments:
-            print(f"Unknown experiment '{args.experiment}'. Choices: {list(experiments)}")
-            sys.exit(1)
-        experiments = {args.experiment: experiments[args.experiment]}
+    runs = _filter_runs(
+        plan.runs,
+        run_id=args.run_id,
+        cell_id=args.cell_id,
+        workload_id=args.workload_id,
+        baseline_only=args.baseline_only,
+        spec_only=args.spec_only,
+        limit=args.limit,
+    )
 
-    for name, exp_cfg in experiments.items():
-        print(f"\n{'='*60}")
-        print(f"Experiment: {exp_cfg['name']}")
-        if args.wait_for_vllm > 0:
-            wait_for_vllm(cfg["vllm"]["base_url"], timeout=args.wait_for_vllm)
-        elif not args.no_wait:
-            print(f"Launch script: {exp_cfg.get('launch_script', 'n/a')}")
-            print("Make sure vLLM is running with this model pair before continuing.")
-            input("Press Enter when vLLM is ready... ")
-        run_experiment(name, exp_cfg, cfg, out_dir)
+    if args.list_runs:
+        _print_runs(runs, plan)
+        return
 
-    print("\nAll done. Run `python src/analyze.py` to generate charts.")
+    if not runs:
+        print("No runs matched the requested filters.", file=sys.stderr)
+        sys.exit(1)
+
+    vram_messages = _vram_messages_for_runs(plan, runs)
+    if not args.skip_vram_validation and any(msg.startswith("ERROR:") for msg in vram_messages):
+        print("VRAM validation failed for selected runs:", file=sys.stderr)
+        print("\n".join(vram_messages), file=sys.stderr)
+        sys.exit(2)
+
+    for warning in vram_messages:
+        logger.warning(warning)
+
+    if args.dry_run:
+        for run in runs:
+            print(f"\n# {run.run_id}")
+            print(" ".join(build_vllm_command(run)))
+        return
+
+    session_dir = _session_dir(Path(args.out_dir), plan)
+    session_dir.mkdir(parents=True, exist_ok=True)
+    logger.info("Writing results under %s", session_dir)
+
+    for run in runs:
+        _run_one(
+            run=run,
+            plan=plan,
+            session_dir=session_dir,
+            external_vllm=args.external_vllm,
+            base_url=args.base_url,
+            metrics_url=args.metrics_url,
+            health_url=args.health_url,
+            health_timeout=args.health_timeout,
+        )
+
+    print(f"Completed {len(runs)} run(s). Results: {session_dir}")
+
+
+def _run_one(
+    *,
+    run: RunConfig,
+    plan: ExperimentPlan,
+    session_dir: Path,
+    external_vllm: bool,
+    base_url: str | None,
+    metrics_url: str | None,
+    health_url: str | None,
+    health_timeout: int,
+) -> None:
+    run_dir = session_dir / run.run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    effective_base_url = base_url or os.environ.get("VLLM_BASE_URL") or _base_url_for_run(run)
+    effective_metrics_url = metrics_url or os.environ.get("VLLM_METRICS_URL") or _metrics_url_for_base(
+        effective_base_url
+    )
+    effective_health_url = health_url or os.environ.get("VLLM_HEALTH_URL") or _health_url_for_base(
+        effective_base_url
+    )
+
+    logger.info("Starting run %s", run.run_id)
+    if external_vllm:
+        wait_for_healthy(effective_health_url, timeout_seconds=health_timeout)
+        run_warmup(effective_base_url, run, plan.baselines.warmup_requests)
+        collect_run(
+            run=run,
+            base_url=effective_base_url,
+            metrics_url=effective_metrics_url,
+            out_dir=run_dir,
+        )
+        return
+
+    server = VLLMServerProcess(run, log_path=run_dir / "vllm.log")
+    try:
+        server.start()
+        wait_for_healthy(effective_health_url, timeout_seconds=health_timeout)
+        run_warmup(effective_base_url, run, plan.baselines.warmup_requests)
+        collect_run(
+            run=run,
+            base_url=effective_base_url,
+            metrics_url=effective_metrics_url,
+            out_dir=run_dir,
+        )
+    finally:
+        server.stop()
+
+
+def _filter_runs(
+    runs: list[RunConfig],
+    *,
+    run_id: str | None,
+    cell_id: str | None,
+    workload_id: str | None,
+    baseline_only: bool,
+    spec_only: bool,
+    limit: int | None,
+) -> list[RunConfig]:
+    if baseline_only and spec_only:
+        raise SystemExit("--baseline-only and --spec-only are mutually exclusive")
+
+    filtered = runs
+    if run_id:
+        filtered = [run for run in filtered if run.run_id == run_id]
+    if cell_id:
+        filtered = [run for run in filtered if run.cell_id == cell_id]
+    if workload_id:
+        filtered = [run for run in filtered if run.workload_id == workload_id]
+    if baseline_only:
+        filtered = [run for run in filtered if run.is_baseline]
+    if spec_only:
+        filtered = [run for run in filtered if not run.is_baseline]
+    if limit is not None:
+        filtered = filtered[:limit]
+    return filtered
+
+
+def _find_run(runs: list[RunConfig], run_id: str) -> RunConfig:
+    for run in runs:
+        if run.run_id == run_id:
+            return run
+    choices = ", ".join(run.run_id for run in runs[:10])
+    raise SystemExit(f"Unknown run_id '{run_id}'. First choices: {choices}")
+
+
+def _print_runs(runs: list[RunConfig], plan: ExperimentPlan) -> None:
+    print(f"Experiment: {plan.experiment.name} v{plan.experiment.version}")
+    print(f"Hardware: {plan.hardware.gpu_count}x {plan.hardware.gpu_sku} ({plan.hardware.vram_gb:g}GB each)")
+    vram_messages = _vram_messages_for_runs(plan, runs)
+    if vram_messages:
+        print("VRAM checks:")
+        for warning in vram_messages:
+            print(f"  {warning}")
+    print()
+    print(f"{'run_id':<58} {'cell':<10} {'k':>2} {'temp':>4} {'workload':<10} {'mode':<8}")
+    print("-" * 100)
+    for run in runs:
+        mode = "baseline" if run.is_baseline else "spec"
+        print(
+            f"{run.run_id:<58} {run.cell_id:<10} "
+            f"{run.num_speculative_tokens:>2} {run.temperature:>4.1f} "
+            f"{run.workload_id:<10} {mode:<8}"
+        )
+
+
+def _session_dir(out_dir: Path, plan: ExperimentPlan) -> Path:
+    if not plan.experiment.timestamp_prefix:
+        return out_dir
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    return out_dir / f"{timestamp}_{plan.experiment.name}"
+
+
+def _base_url_for_run(run: RunConfig) -> str:
+    return f"http://localhost:{run.vllm_port}/v1"
+
+
+def _vram_messages_for_runs(plan: ExperimentPlan, runs: list[RunConfig]) -> list[str]:
+    selected_cell_ids = {run.cell_id for run in runs}
+    available = plan.hardware.total_vram_gb
+    overhead = plan.vllm_defaults.kv_cache_overhead_gb
+    min_headroom = plan.vllm_defaults.min_vram_headroom_gb
+    messages: list[str] = []
+
+    for cell in plan.cells:
+        if cell.id not in selected_cell_ids:
+            continue
+        required = cell.total_vram_gb + overhead
+        headroom = available - required
+        if headroom < 0:
+            messages.append(
+                "ERROR: "
+                f"cell '{cell.id}' needs ~{required:.1f}GB "
+                f"({cell.total_vram_gb:.1f}GB model + {overhead:.1f}GB KV/cache overhead) "
+                f"but {plan.hardware.gpu_count}x {plan.hardware.gpu_sku} provides "
+                f"~{available:.1f}GB. Reduce max_model_len, use a smaller/quantized verifier, "
+                "or increase gpu_count."
+            )
+        elif headroom < min_headroom:
+            messages.append(
+                "WARNING: "
+                f"cell '{cell.id}' has only ~{headroom:.1f}GB VRAM headroom. "
+                "Expect KV-cache pressure on longer sequences."
+            )
+    return messages
+
+
+def _metrics_url_for_base(base_url: str) -> str:
+    parsed = urlparse(base_url)
+    base = f"{parsed.scheme}://{parsed.netloc}"
+    return base + "/metrics"
+
+
+def _health_url_for_base(base_url: str) -> str:
+    parsed = urlparse(base_url)
+    base = f"{parsed.scheme}://{parsed.netloc}"
+    return base + "/health"
 
 
 if __name__ == "__main__":
