@@ -1,0 +1,10 @@
+id: "lighteval"
+source: "lighteval"
+num_prompts: 45
+num_prompts_per_task: 15
+max_output_tokens: 512
+tasks:
+  - "extended|ifeval|0|0"
+  - "lighteval|gsm8k|5|0"
+  - "leaderboard|mmlu_pro:computer_science|5|0"
+description: "Optional lighteval workload: IFEval, GSM8K, and MMLU-Pro computer science"

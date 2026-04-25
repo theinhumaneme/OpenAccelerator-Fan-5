@@ -7,6 +7,7 @@ from pathlib import Path
 import numpy as np
 
 from config_manager import RunConfig
+from driver.evaluation import compute_task_accuracy
 from driver.metrics_scraper import MetricSnapshot, fetch_vllm_metrics
 from driver.request_driver import RequestResult, send_workload
 
@@ -32,6 +33,7 @@ def collect_run(
         "metrics_before": _snapshot_to_dict(metrics_before),
         "metrics_after": _snapshot_to_dict(metrics_after),
         "stats": aggregate(results),
+        "accuracy": compute_task_accuracy(results),
         "difficulty_buckets": bucket_by_difficulty(
             [lp for result in results for lp in result.token_logprobs]
         ),

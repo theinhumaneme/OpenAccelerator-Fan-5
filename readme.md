@@ -4,10 +4,10 @@ This repo benchmarks quantized self-speculation on Gemma 4 verifier/draft pairs 
 
 1. Expand a validated experiment config.
 2. Start vLLM with the correct verifier and optional draft model.
-3. Drive a JSONL workload through the OpenAI-compatible completions API.
+3. Drive a workload through the OpenAI-compatible completions API.
 4. Scrape vLLM Prometheus metrics and generate comparison charts.
 
-The configured matrix has 32 speculative runs:
+The default configured matrix has 32 speculative runs:
 
 - Cells: `dense-31b`, `moe-26b`
 - Speculation length `k`: `1, 3, 5, 7`
@@ -16,9 +16,20 @@ The configured matrix has 32 speculative runs:
 
 With `baselines.run_no_speculation: true`, the runner also adds 4 verifier-only baseline runs.
 
+## Metrics
+
+| Metric | How it is measured |
+|---|---|
+| Acceptance rate | `vllm:spec_decode_draft_acceptance_rate` from vLLM Prometheus `/metrics` |
+| Throughput | Completion tokens divided by request wall time |
+| TTFT / P95 TTFT | Time to first streamed token per prompt |
+| Token difficulty | Mean verifier output logprob bucketed into quartiles |
+| IFEval accuracy | Optional lighteval workload: prompt and instruction pass rates |
+| Other task accuracy | Optional lighteval workload: prefix-match score for short-answer tasks |
+
 ## Important A100-80GB Constraint
 
-`configs/experiment.yaml` is set to `1x A100-80GB` because that is the target hardware. The dense cell estimates:
+`configs/experiment.yaml` is set to `1x A100-80GB`. The dense cell estimates:
 
 ```text
 78GB model footprint + 4GB KV/cache overhead = ~82GB required
@@ -36,13 +47,15 @@ cp .env.example .env
 
 Gemma models are gated on Hugging Face. Accept the model licenses before running.
 
+`lighteval[extended_tasks]` is included for the optional lighteval workload. The default matrix still uses the local JSONL fixtures.
+
 ## Inspect Runs
 
 ```bash
 ./run.sh --list-runs
 ```
 
-This prints all expanded run IDs. Example:
+Example run IDs:
 
 ```text
 run_0000_baseline_dense-31b_humaneval
@@ -88,6 +101,16 @@ Podman GPU access requires CDI on many systems:
 sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml
 ```
 
+## Optional Lighteval Workload
+
+The merge includes the benchmark branch’s lighteval support for:
+
+- `extended|ifeval|0|0`
+- `lighteval|gsm8k|5|0`
+- `leaderboard|mmlu_pro:computer_science|5|0`
+
+To run those tasks, add `workloads/lighteval_eval.yaml` to `workload_registry` in `configs/experiment.yaml`, then list or run the expanded IDs. The collector will add `accuracy` fields to each `result.json`, and `src/analyze.py` will produce `task_accuracy.png` when those fields are present.
+
 ## Analyze Results
 
 ```bash
@@ -99,7 +122,9 @@ Charts are written to `results/charts/`:
 - `acceptance_rates.png`
 - `throughput.png`
 - `ttft.png`
+- `task_accuracy.png` when accuracy data exists
 - `by_workload.png`
+- `by_category.png`
 - `difficulty_buckets.png`
 
 ## Project Structure
@@ -109,14 +134,8 @@ Charts are written to `results/charts/`:
 ├── configs/
 │   ├── experiment.yaml
 │   ├── models/
-│   │   ├── gemma4-31b-dense.yaml
-│   │   └── gemma4-26b-moe.yaml
 │   └── workloads/
-│       ├── humaneval.yaml
-│       └── sharegpt.yaml
 ├── workload_data/
-│   ├── humaneval_prompts.jsonl
-│   └── sharegpt_slice.jsonl
 ├── src/
 │   ├── benchmark.py
 │   ├── config_manager.py
@@ -138,4 +157,4 @@ results/<timestamp>_gemma4-self-spec-dense-vs-moe/<run_id>/
 └── vllm.log
 ```
 
-`result.json` includes the expanded run config, request-level latency/throughput records, vLLM metrics before and after the workload, acceptance rate, and difficulty buckets from streamed token logprobs.
+`result.json` includes the expanded run config, request-level latency/throughput records, vLLM metrics before and after the workload, acceptance rate, optional accuracy metrics, and difficulty buckets from streamed token logprobs.

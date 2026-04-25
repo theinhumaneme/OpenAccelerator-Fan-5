@@ -1,4 +1,5 @@
 id: "sharegpt"
+source: "jsonl"
 data_path: "workload_data/sharegpt_slice.jsonl"
 num_prompts: 200
 max_output_tokens: 1024

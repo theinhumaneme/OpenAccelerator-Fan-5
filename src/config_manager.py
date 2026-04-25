@@ -58,10 +58,21 @@ class CellConfig(BaseModel):
 
 class WorkloadConfig(BaseModel):
     id: str
-    data_path: str
+    source: Literal["jsonl", "lighteval"] = "jsonl"
+    data_path: str | None = None
+    tasks: list[str] = Field(default_factory=list)
     num_prompts: int = Field(gt=0)
+    num_prompts_per_task: int | None = Field(default=None, gt=0)
     max_output_tokens: int = Field(gt=0)
     description: str = ""
+
+    @model_validator(mode="after")
+    def validate_source_fields(self) -> "WorkloadConfig":
+        if self.source == "jsonl" and not self.data_path:
+            raise ValueError(f"JSONL workload '{self.id}' requires data_path")
+        if self.source == "lighteval" and not self.tasks:
+            raise ValueError(f"lighteval workload '{self.id}' requires tasks")
+        return self
 
 
 class SweepConfig(BaseModel):
@@ -121,8 +132,11 @@ class RunConfig(BaseModel):
     num_speculative_tokens: int
     temperature: float
     workload_id: str
-    workload_path: str
+    workload_source: Literal["jsonl", "lighteval"]
+    workload_path: str | None
+    workload_tasks: list[str]
     workload_declared_num_prompts: int
+    workload_num_prompts_per_task: int | None
     max_output_tokens: int
     is_baseline: bool
     vllm_host: str
@@ -305,8 +319,11 @@ def _build_run(
         num_speculative_tokens=num_speculative_tokens,
         temperature=temperature,
         workload_id=workload.id,
+        workload_source=workload.source,
         workload_path=workload.data_path,
+        workload_tasks=workload.tasks,
         workload_declared_num_prompts=workload.num_prompts,
+        workload_num_prompts_per_task=workload.num_prompts_per_task,
         max_output_tokens=workload.max_output_tokens,
         is_baseline=is_baseline,
         vllm_host=defaults.host,
@@ -342,8 +359,10 @@ def _load_workload(path: Path, project_root: Path) -> WorkloadConfig:
     except ValidationError as exc:
         raise ValueError(f"Invalid workload config {path}: {exc}") from exc
 
-    data_path = _resolve_path(workload.data_path, path.parent, project_root)
-    return workload.model_copy(update={"data_path": str(data_path)})
+    if workload.source == "jsonl" and workload.data_path is not None:
+        data_path = _resolve_path(workload.data_path, path.parent, project_root)
+        return workload.model_copy(update={"data_path": str(data_path)})
+    return workload
 
 
 def _resolve_path(path: str, config_dir: Path, project_root: Path) -> Path:

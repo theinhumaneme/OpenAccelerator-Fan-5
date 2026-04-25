@@ -10,6 +10,7 @@ from openai import OpenAI
 from tqdm import tqdm
 
 from config_manager import RunConfig
+from driver.lighteval_loader import load_lighteval_tasks
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +19,11 @@ logger = logging.getLogger(__name__)
 class PromptRecord:
     prompt: str
     category: str = "unknown"
+    target: str = ""
+    choices: list[str] = field(default_factory=list)
+    task_name: str = ""
+    instruction_ids: list[str] = field(default_factory=list)
+    instruction_kwargs: list[dict] = field(default_factory=list)
 
 
 @dataclass
@@ -35,12 +41,17 @@ class RequestResult:
     temperature: float
     finish_reason: str
     token_logprobs: list[float] = field(default_factory=list)
+    target: str = ""
+    choices: list[str] = field(default_factory=list)
+    task_name: str = ""
+    instruction_ids: list[str] = field(default_factory=list)
+    instruction_kwargs: list[dict] = field(default_factory=list)
     error: str | None = None
 
 
 def send_workload(base_url: str, run: RunConfig) -> list[RequestResult]:
     client = OpenAI(base_url=base_url, api_key="placeholder", timeout=300.0)
-    prompts = _load_prompts(run.workload_path)
+    prompts = _load_prompts(run)
     results: list[RequestResult] = []
 
     for idx, record in enumerate(tqdm(prompts, desc=run.run_id, ncols=90)):
@@ -103,6 +114,11 @@ def _send_one(
             tokens_per_second=0,
             temperature=run.temperature,
             finish_reason="error",
+            target=record.target,
+            choices=record.choices,
+            task_name=record.task_name,
+            instruction_ids=record.instruction_ids,
+            instruction_kwargs=record.instruction_kwargs,
             error=str(exc),
         )
 
@@ -125,12 +141,37 @@ def _send_one(
         temperature=run.temperature,
         finish_reason=finish_reason,
         token_logprobs=token_logprobs,
+        target=record.target,
+        choices=record.choices,
+        task_name=record.task_name,
+        instruction_ids=record.instruction_ids,
+        instruction_kwargs=record.instruction_kwargs,
     )
 
 
-def _load_prompts(path: str) -> list[PromptRecord]:
+def _load_prompts(run: RunConfig) -> list[PromptRecord]:
+    if run.workload_source == "lighteval":
+        return [
+            PromptRecord(
+                prompt=str(item["prompt"]),
+                category=str(item.get("category", "unknown")),
+                target=str(item.get("target", "")),
+                choices=[str(choice) for choice in item.get("choices", [])],
+                task_name=str(item.get("task_name", "")),
+                instruction_ids=[str(iid) for iid in item.get("instruction_ids", [])],
+                instruction_kwargs=[dict(kwargs) for kwargs in item.get("instruction_kwargs", [])],
+            )
+            for item in load_lighteval_tasks(
+                run.workload_tasks,
+                num_prompts_per_task=run.workload_num_prompts_per_task,
+            )
+        ]
+
+    if run.workload_path is None:
+        raise ValueError(f"JSONL workload {run.workload_id} has no workload_path")
+
     records: list[PromptRecord] = []
-    with Path(path).open() as f:
+    with Path(run.workload_path).open() as f:
         for line_number, line in enumerate(f, start=1):
             line = line.strip()
             if not line:
@@ -138,7 +179,16 @@ def _load_prompts(path: str) -> list[PromptRecord]:
             obj = json.loads(line)
             prompt = obj.get("prompt")
             if not isinstance(prompt, str) or not prompt:
-                raise ValueError(f"{path}:{line_number} must contain a non-empty 'prompt'")
-            category = obj.get("category", "unknown")
-            records.append(PromptRecord(prompt=prompt, category=str(category)))
+                raise ValueError(f"{run.workload_path}:{line_number} must contain a non-empty 'prompt'")
+            records.append(
+                PromptRecord(
+                    prompt=prompt,
+                    category=str(obj.get("category", "unknown")),
+                    target=str(obj.get("target", "")),
+                    choices=[str(choice) for choice in obj.get("choices", [])],
+                    task_name=str(obj.get("task_name", "")),
+                    instruction_ids=[str(iid) for iid in obj.get("instruction_ids", [])],
+                    instruction_kwargs=[dict(kwargs) for kwargs in obj.get("instruction_kwargs", [])],
+                )
+            )
     return records
