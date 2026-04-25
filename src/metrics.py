@@ -164,11 +164,6 @@ def compute_task_accuracy(results: list) -> dict:
     return out
 
 
-# vLLM exposes this gauge in its Prometheus /metrics endpoint when
-# speculative decoding is enabled.
-_ACCEPTANCE_RATE_METRIC = "vllm:spec_decode_draft_acceptance_rate"
-
-
 def fetch_acceptance_rate(metrics_url: str) -> float | None:
     try:
         resp = httpx.get(metrics_url, timeout=5.0)
@@ -178,8 +173,10 @@ def fetch_acceptance_rate(metrics_url: str) -> float | None:
         return None
 
     for line in resp.text.splitlines():
-        if line.startswith(_ACCEPTANCE_RATE_METRIC) and not line.startswith("#"):
-            m = re.search(r"\}\s*([\d.eE+\-]+)", line)
+        if line.startswith("#"):
+            continue
+        if "acceptance_rate" in line.lower():
+            m = re.search(r"[\s}]([\d.eE+\-]+)\s*$", line)
             if m:
                 return float(m.group(1))
     return None
