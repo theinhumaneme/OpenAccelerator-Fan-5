@@ -41,8 +41,6 @@ services:
             --max-model-len "$$MAX_MODEL_LEN" \
             --max-num-seqs "$$MAX_NUM_SEQS" \
             --block-size "$$BLOCK_SIZE" \
-            --disable-log-requests \
-            --enable-metrics \
             --speculative-config "$$SPECULATIVE_CONFIG"
         else
           exec vllm serve "$$VERIFIER_MODEL" \
@@ -53,9 +51,7 @@ services:
             --gpu-memory-utilization "$$GPU_MEMORY_UTILIZATION" \
             --max-model-len "$$MAX_MODEL_LEN" \
             --max-num-seqs "$$MAX_NUM_SEQS" \
-            --block-size "$$BLOCK_SIZE" \
-            --disable-log-requests \
-            --enable-metrics
+            --block-size "$$BLOCK_SIZE"
         fi
     deploy:
       resources:

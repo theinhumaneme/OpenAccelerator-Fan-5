@@ -19,8 +19,6 @@ args=(
   --max-model-len "$MAX_MODEL_LEN"
   --max-num-seqs "$MAX_NUM_SEQS"
   --block-size "$BLOCK_SIZE"
-  --disable-log-requests
-  --enable-metrics
 )
 
 if [[ -n "$SPECULATIVE_CONFIG" ]]; then

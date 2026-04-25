@@ -35,8 +35,6 @@ def build_vllm_command(run: RunConfig) -> list[str]:
         str(run.max_num_seqs),
         "--block-size",
         str(run.block_size),
-        "--disable-log-requests",
-        "--enable-metrics",
     ]
 
     if run.enforce_eager:
