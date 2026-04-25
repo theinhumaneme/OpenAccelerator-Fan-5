@@ -210,8 +210,9 @@ tempCodeRunnerFile.py
 .pypirc
 
 # Benchmark outputs (large JSON files and charts)
-results/*.json
-results/charts/
+results/**
+!results/
+!results/.gitkeep
 
 # Quantized model weights
 quantized-draft/
