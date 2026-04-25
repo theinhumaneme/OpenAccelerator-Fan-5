@@ -13,6 +13,9 @@ class RequestResult:
     total_ms: float
     throughput_tps: float
     token_logprobs: list[float] = field(default_factory=list)
+    target: str = ""
+    instruction_ids: list[str] = field(default_factory=list)
+    instruction_kwargs: list[dict] = field(default_factory=list)
 
 
 def make_client(base_url: str) -> OpenAI:
@@ -25,30 +28,32 @@ def run_request(
     prompt: str,
     category: str,
     max_tokens: int = 256,
+    target: str = "",
+    instruction_ids: list[str] | None = None,
+    instruction_kwargs: list[dict] | None = None,
 ) -> RequestResult:
     start = time.perf_counter()
     first_token_t: float | None = None
     output_parts: list[str] = []
     token_logprobs: list[float] = []
 
-    stream = client.completions.create(
+    stream = client.chat.completions.create(
         model=model,
-        prompt=prompt,
+        messages=[{"role": "user", "content": prompt}],
         max_tokens=max_tokens,
-        logprobs=1,
+        logprobs=True,
+        top_logprobs=1,
         stream=True,
     )
 
     for chunk in stream:
         choice = chunk.choices[0]
-        if choice.text:
+        if choice.delta.content:
             if first_token_t is None:
                 first_token_t = time.perf_counter()
-            output_parts.append(choice.text)
-        if choice.logprobs and choice.logprobs.token_logprobs:
-            token_logprobs.extend(
-                lp for lp in choice.logprobs.token_logprobs if lp is not None
-            )
+            output_parts.append(choice.delta.content)
+        if choice.logprobs and choice.logprobs.content:
+            token_logprobs.extend(item.logprob for item in choice.logprobs.content)
 
     total_ms = (time.perf_counter() - start) * 1000
     ttft_ms = ((first_token_t - start) * 1000) if first_token_t else total_ms
@@ -65,4 +70,7 @@ def run_request(
         total_ms=total_ms,
         throughput_tps=throughput_tps,
         token_logprobs=token_logprobs,
+        target=target,
+        instruction_ids=instruction_ids or [],
+        instruction_kwargs=instruction_kwargs or [],
     )

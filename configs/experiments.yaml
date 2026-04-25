@@ -8,8 +8,8 @@ experiments:
   # the draft is a compressed version of the same distribution.
   dense_same_family:
     name: "Dense Draft → Dense Verifier (same family)"
-    verifier: "google/gemma-2-27b-it"
-    draft: "google/gemma-2-2b-it"
+    verifier: "google/gemma-1.1-7b-it"
+    draft: "google/gemma-1.1-2b-it"
     verifier_type: dense
     family: same
     launch_script: "scripts/launch_dense_same.sh"
@@ -48,8 +48,11 @@ vllm:
   base_url: "http://localhost:8000/v1"
   metrics_url: "http://localhost:8000/metrics"
   num_speculative_tokens: 5
-  max_tokens: 256
+  max_tokens: 512
 
 benchmark:
-  num_prompts: 50          # ~17 per category
-  categories: [code, math, chat]
+  num_prompts_per_task: 15
+  tasks:
+    - "ifeval|0"    # instruction following
+    - "gsm8k|5"    # math reasoning
+    - "mmlu_pro|5" # MMLU-Pro

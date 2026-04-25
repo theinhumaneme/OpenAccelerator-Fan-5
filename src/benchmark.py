@@ -16,7 +16,6 @@ import os
 import sys
 import json
 import time
-import random
 import argparse
 from pathlib import Path
 from dataclasses import asdict
@@ -27,8 +26,8 @@ from tqdm import tqdm
 
 sys.path.insert(0, str(Path(__file__).parent))
 from client import make_client, run_request
-from metrics import fetch_acceptance_rate, bucket_by_difficulty, aggregate
-from prompts import PROMPTS
+from metrics import fetch_acceptance_rate, bucket_by_difficulty, aggregate, compute_task_accuracy
+from prompts import load_lighteval_tasks
 
 
 def wait_for_vllm(base_url: str, timeout: int = 300) -> None:
@@ -52,42 +51,34 @@ def load_config(path: str) -> dict:
         return yaml.safe_load(f)
 
 
-def collect_prompts(categories: list[str], total: int) -> list[tuple[str, str]]:
-    per_cat = max(1, total // len(categories))
-    out: list[tuple[str, str]] = []
-    for cat in categories:
-        pool = PROMPTS.get(cat, [])
-        sample = random.sample(pool, min(per_cat, len(pool)))
-        out.extend((p, cat) for p in sample)
-    return out
-
-
 def run_experiment(
     exp_name: str,
     exp_cfg: dict,
     global_cfg: dict,
     out_dir: Path,
+    prompts: list[dict],
 ) -> dict:
     vllm = global_cfg["vllm"]
-    bench = global_cfg["benchmark"]
 
     client = make_client(vllm["base_url"])
-    prompts = collect_prompts(bench["categories"], bench["num_prompts"])
 
     print(f"  Verifier : {exp_cfg['verifier']}")
     print(f"  Draft    : {exp_cfg['draft']}")
-    print(f"  Prompts  : {len(prompts)} ({bench['num_prompts']} requested)")
+    print(f"  Prompts  : {len(prompts)}")
 
     acc_before = fetch_acceptance_rate(vllm["metrics_url"])
 
     results = []
-    for prompt, category in tqdm(prompts, desc=exp_name, ncols=80):
+    for item in tqdm(prompts, desc=exp_name, ncols=80):
         result = run_request(
             client=client,
             model=exp_cfg["verifier"],
-            prompt=prompt,
-            category=category,
+            prompt=item["prompt"],
+            category=item["category"],
             max_tokens=vllm["max_tokens"],
+            target=item["target"],
+            instruction_ids=item.get("instruction_ids"),
+            instruction_kwargs=item.get("instruction_kwargs"),
         )
         results.append(result)
         time.sleep(0.05)
@@ -95,6 +86,7 @@ def run_experiment(
     acc_after = fetch_acceptance_rate(vllm["metrics_url"])
 
     all_logprobs = [lp for r in results for lp in r.token_logprobs]
+    categories = sorted(set(item["category"] for item in prompts))
 
     output = {
         "experiment": exp_name,
@@ -102,10 +94,11 @@ def run_experiment(
         "acceptance_rate": acc_after,
         "acceptance_rate_before": acc_before,
         "stats": aggregate(results),
+        "accuracy": compute_task_accuracy(results),
         "difficulty_buckets": bucket_by_difficulty(all_logprobs),
         "per_category": {
             cat: aggregate([r for r in results if r.category == cat])
-            for cat in bench["categories"]
+            for cat in categories
         },
         "raw": [asdict(r) for r in results],
     }
@@ -158,6 +151,14 @@ def main() -> None:
             sys.exit(1)
         experiments = {args.experiment: experiments[args.experiment]}
 
+    bench = cfg["benchmark"]
+    print(f"Loading prompts from {len(bench['tasks'])} lighteval tasks ...")
+    prompts = load_lighteval_tasks(
+        bench["tasks"],
+        num_prompts_per_task=bench.get("num_prompts_per_task"),
+    )
+    print(f"Loaded {len(prompts)} prompts.\n")
+
     for name, exp_cfg in experiments.items():
         print(f"\n{'='*60}")
         print(f"Experiment: {exp_cfg['name']}")
@@ -167,7 +168,7 @@ def main() -> None:
             print(f"Launch script: {exp_cfg.get('launch_script', 'n/a')}")
             print("Make sure vLLM is running with this model pair before continuing.")
             input("Press Enter when vLLM is ready... ")
-        run_experiment(name, exp_cfg, cfg, out_dir)
+        run_experiment(name, exp_cfg, cfg, out_dir, prompts)
 
     print("\nAll done. Run `python src/analyze.py` to generate charts.")
 

@@ -126,8 +126,47 @@ def plot_ttft(data: dict, out_dir: Path) -> None:
     print(f"  Saved {path}")
 
 
+def plot_task_accuracy(data: dict, out_dir: Path) -> None:
+    names = list(data.keys())
+    x = np.arange(len(names))
+    w = 0.28
+
+    prompt_accs = [data[n].get("accuracy", {}).get("ifeval", {}).get("prompt_accuracy", 0.0) for n in names]
+    inst_accs = [data[n].get("accuracy", {}).get("ifeval", {}).get("instruction_accuracy", 0.0) for n in names]
+    other_accs = [data[n].get("accuracy", {}).get("other_accuracy", 0.0) for n in names]
+
+    fig, ax = plt.subplots(figsize=(11, 4))
+    b1 = ax.bar(x - w, prompt_accs, w, label="IFEval prompt acc", color=[_color(n) for n in names])
+    b2 = ax.bar(x,     inst_accs,   w, label="IFEval instruction acc", color=[_color(n) for n in names], alpha=0.6)
+    b3 = ax.bar(x + w, other_accs,  w, label="Other task acc (GSM8K/MMLU-Pro)", color=[_color(n) for n in names], alpha=0.35)
+
+    ax.set_xticks(x)
+    ax.set_xticklabels([_short_label(n) for n in names])
+    ax.set_ylabel("Accuracy")
+    ax.set_title("Task Accuracy by Verifier Architecture")
+    ax.set_ylim(0, 1.1)
+    for bars in (b1, b2, b3):
+        for bar in bars:
+            h = bar.get_height()
+            if h > 0:
+                ax.text(bar.get_x() + bar.get_width() / 2, h + 0.01, f"{h:.2f}",
+                        ha="center", va="bottom", fontsize=7)
+    ax.legend(fontsize=7, loc="upper right")
+    plt.tight_layout()
+    path = out_dir / "task_accuracy.png"
+    fig.savefig(path, dpi=150)
+    plt.close(fig)
+    print(f"  Saved {path}")
+
+
 def plot_by_category(data: dict, out_dir: Path) -> None:
-    categories = ["code", "math", "chat"]
+    categories = sorted(set(
+        cat
+        for d in data.values()
+        for cat in d.get("per_category", {})
+    ))
+    if not categories:
+        return
     exp_names = list(data.keys())
     x = np.arange(len(categories))
     w = 0.8 / len(exp_names)
@@ -182,20 +221,32 @@ def plot_difficulty_buckets(data: dict, out_dir: Path) -> None:
 
 
 def print_summary(data: dict) -> None:
-    print("\n" + "=" * 80)
-    print(f"{'Experiment':<35} {'AccRate':>8} {'TPS':>8} {'TTFT_ms':>9} {'P95_ms':>9}")
-    print("-" * 80)
+    header = (
+        f"{'Experiment':<35} {'AccRate':>8} {'TPS':>8} {'TTFT_ms':>9}"
+        f" {'P95_ms':>9} {'IF_Prompt':>10} {'IF_Inst':>8} {'Other':>7}"
+    )
+    w = len(header)
+    print("\n" + "=" * w)
+    print(header)
+    print("-" * w)
     for name, d in data.items():
         acc = d.get("acceptance_rate")
         s = d.get("stats", {})
+        accd = d.get("accuracy", {})
+        if_prompt = accd.get("ifeval", {}).get("prompt_accuracy", 0.0)
+        if_inst = accd.get("ifeval", {}).get("instruction_accuracy", 0.0)
+        other = accd.get("other_accuracy", 0.0)
         print(
             f"{name:<35} "
             f"{acc or 0:>8.3f} "
             f"{s.get('mean_throughput_tps', 0):>8.1f} "
             f"{s.get('mean_ttft_ms', 0):>9.1f} "
-            f"{s.get('p95_ttft_ms', 0):>9.1f}"
+            f"{s.get('p95_ttft_ms', 0):>9.1f} "
+            f"{if_prompt:>10.3f} "
+            f"{if_inst:>8.3f} "
+            f"{other:>7.3f}"
         )
-    print("=" * 80)
+    print("=" * w)
 
 
 def main() -> None:
@@ -217,6 +268,7 @@ def main() -> None:
     plot_acceptance_rates(data, out_dir)
     plot_throughput(data, out_dir)
     plot_ttft(data, out_dir)
+    plot_task_accuracy(data, out_dir)
     plot_by_category(data, out_dir)
     plot_difficulty_buckets(data, out_dir)
 
