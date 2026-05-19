@@ -233,3 +233,5 @@ Mixtral-8x7B fits comfortably on 2× A100 80GB in bf16. Gemma-2-27B needs ~55GB,
 If MoE verifiers show **lower acceptance rates but equal or higher throughput**, that means the standard evaluation metric for speculative decoding (acceptance rate) is misleading for MoE architectures. The correct metric is effective tokens per GPU-second, and optimizing for acceptance rate alone would lead to wrong model selection decisions.
 
 If acceptance rate gaps are **concentrated at hard tokens** (low logprob buckets), that implies speculation length `k` should be tuned differently for MoE verifiers — shorter sequences to avoid wasted computation on the hard tokens where rejection is likely.
+# spec_deconing_benchmark_hackathon
+# spec_deconing_benchmark_hackathon

@@ -38,7 +38,14 @@ def _short_label(exp_name: str) -> str:
 
 def plot_acceptance_rates(data: dict, out_dir: Path) -> None:
     names = list(data.keys())
-    rates = [data[n].get("acceptance_rate") or 0.0 for n in names]
+    rates = []
+    for n in names:
+        val = data[n].get("acceptance_rate") or 0.0
+        if val > 1.0:
+            print(f"  [warn] {n}: acceptance_rate {val:.2f} > 1.0 (clipping to 1.0). "
+                  f"Check if results were from a broken scraper.")
+            val = 1.0
+        rates.append(val)
 
     fig, ax = plt.subplots(figsize=(9, 4))
     bars = ax.bar(
@@ -231,6 +238,12 @@ def print_summary(data: dict) -> None:
     print("-" * w)
     for name, d in data.items():
         acc = d.get("acceptance_rate")
+        if acc is not None and acc > 1.0:
+            # We don't clip here so the user sees the real value in the table
+            acc_str = f"*{acc:>8.3f}" 
+        else:
+            acc_str = f"{acc or 0:>8.3f}"
+
         s = d.get("stats", {})
         accd = d.get("accuracy", {})
         if_prompt = accd.get("ifeval", {}).get("prompt_accuracy", 0.0)
@@ -238,7 +251,7 @@ def print_summary(data: dict) -> None:
         other = accd.get("other_accuracy", 0.0)
         print(
             f"{name:<35} "
-            f"{acc or 0:>8.3f} "
+            f"{acc_str} "
             f"{s.get('mean_throughput_tps', 0):>8.1f} "
             f"{s.get('mean_ttft_ms', 0):>9.1f} "
             f"{s.get('p95_ttft_ms', 0):>9.1f} "

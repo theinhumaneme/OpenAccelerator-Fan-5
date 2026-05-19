@@ -175,7 +175,9 @@ def fetch_acceptance_rate(metrics_url: str) -> float | None:
     for line in resp.text.splitlines():
         if line.startswith("#"):
             continue
-        if "acceptance_rate" in line.lower():
+        # Standard Prometheus naming for vLLM: vllm:spec_decode_draft_acceptance_rate
+        # but many exporters replace ':' with '_'.
+        if "acceptance_rate" in line.lower() and not any(x in line for x in ("_count", "_sum", "_bucket")):
             m = re.search(r"[\s}]([\d.eE+\-]+)\s*$", line)
             if m:
                 return float(m.group(1))
